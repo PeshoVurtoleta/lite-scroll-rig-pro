@@ -1,0 +1,45 @@
+# @zakkster/lite-scroll-rig-pro
+
+Zero-GC scroll-driven transform rig. Spring-smoothed virtual scroll to keyframed
+matrix3d, batched to the DOM. Zero heap allocation in the per-frame loop.
+
+## Pipeline
+wheel/touch -> VirtualScroll (normalize + clamp -> targetY) -> ScrollEngine
+(spring chases targetY each frame -> currentY) -> renderers. DOMScroller is the
+built-in renderer: currentY -> per-element progress -> keyframe pool -> matrix3d
+-> DOMBinder single flush.
+
+## Interpolation
+Not a lerp. ScrollEngine runs a spring (@zakkster/lite-spring):
+  spring.target = input.targetY; currentY = spring.update(dt);
+currentY feeds computeProgress/inverseLerp. dt is clamped (default 0.05s) so a
+resumed background tab does not lurch. prefers-reduced-motion sets
+currentY = targetY (no spring). Change feel via `preset` option or inject a spring.
+
+## Public API (from src/index.js)
+- ScrollEngine(target, options): addRenderer(r{render(currentY),resize?}), resize(),
+  start(), destroy(). Options: preset, maxDeltaTime, getMaxScroll, reducedMotion,
+  multiplier, touchMultiplier, and DI: input, spring, win, raf, cancelRaf, matchMedia.
+- VirtualScroll(target, options): wheel deltaMode normalization (pixel/line*40/
+  page*800) * multiplier; touch via @zakkster/lite-gesture GestureTracker
+  (onPanMove frameDy, pinch-safe). targetY clamped [0, maxScroll]. DI: createTracker.
+- DOMScroller(elements, pool, options): pool holds elements.length*4 rows in
+  [tx,ty,scale,rotZ]; render(currentY) is the zero-alloc hot loop. Options:
+  binder (DI), win, observe, ResizeObserverCtor.
+- MetricsCache(elements, win, options): measure() writes [enterY,exitY] per element
+  into bounds Float32Array. options.observe attaches a ResizeObserver (DI:
+  ResizeObserverCtor) that re-measures on element size change and calls onResize.
+- composeMatrix2D(outBuf, offset, tx, ty, tz, sx, sy, rz): column-major matrix3d.
+- writeIntersectionBounds(outBuf, offset, absoluteTop, height, viewportHeight,
+  offStart?, offEnd?): zero-alloc bounds. calculateIntersectionBounds(...) is the
+  allocating convenience form. computeProgress(currentY, startY, endY) clamped [0,1].
+  computeParallaxOffset(progress, intensity).
+
+## Dependencies
+@zakkster/lite-gesture, @zakkster/lite-spring, @zakkster/lite-keyframe,
+@zakkster/lite-dom-binder, @zakkster/lite-lerp.
+
+## Conventions
+ESM only, type: module. node:test only. ASCII-only source. Zero per-frame heap
+allocation; getBoundingClientRect only in measure(). Everything external is
+injectable for headless tests. MIT (c) Zahary Shinikchiev.

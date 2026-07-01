@@ -1,0 +1,78 @@
+{
+  "name": "@zakkster/lite-scroll-rig-pro",
+  "version": "1.0.0",
+  "description": "Zero-GC scroll-driven transform rig. Spring-smoothed virtual scroll, pre-measured intersection bounds, keyframed matrix3d batched to the DOM. Built for 16ms frame budgets and long-running sessions.",
+  "author": "Zahary Shinikchiev <shinikchiev@yahoo.com>",
+  "license": "MIT",
+  "type": "module",
+  "main": "src/index.js",
+  "module": "src/index.js",
+  "types": "./src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "node": "./src/index.js",
+      "import": "./src/index.js",
+      "default": "./src/index.js"
+    }
+  },
+  "files": [
+    "src",
+    "README.md",
+    "llms.txt",
+    "LICENSE.txt",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "test": "node --test --test-reporter=spec",
+    "test:gc": "node --expose-gc --test --test-reporter=spec",
+    "test:coverage": "c8 node --test",
+    "verify": "npm test"
+  },
+  "keywords": [
+    "scroll",
+    "smooth-scroll",
+    "scroll-rig",
+    "virtual-scroll",
+    "parallax",
+    "scrollytelling",
+    "scroll-animation",
+    "matrix3d",
+    "transform",
+    "spring",
+    "zero-gc",
+    "zero-allocation",
+    "raf",
+    "twitch-extension",
+    "performance",
+    "gsap-alternative",
+    "lenis-alternative"
+  ],
+  "homepage": "https://github.com/PeshoVurtoleta/lite-scroll-rig-pro#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PeshoVurtoleta/lite-scroll-rig-pro.git"
+  },
+  "bugs": {
+    "url": "https://github.com/PeshoVurtoleta/lite-scroll-rig-pro/issues",
+    "email": "shinikchiev@yahoo.com"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/PeshoVurtoleta"
+  },
+  "sideEffects": false,
+  "dependencies": {
+    "@zakkster/lite-gesture": "^1.0.1",
+    "@zakkster/lite-spring": "^1.0.0",
+    "@zakkster/lite-keyframe": "^1.0.1",
+    "@zakkster/lite-dom-binder": "^1.0.1",
+    "@zakkster/lite-lerp": "^1.0.0"
+  },
+  "devDependencies": {
+    "c8": "^11.0.0"
+  }
+}
