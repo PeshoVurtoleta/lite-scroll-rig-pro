@@ -34,6 +34,7 @@ currentY = targetY (no spring). Change feel via `preset` option or inject a spri
   offStart?, offEnd?): zero-alloc bounds. calculateIntersectionBounds(...) is the
   allocating convenience form. computeProgress(currentY, startY, endY) clamped [0,1].
   computeParallaxOffset(progress, intensity).
+- VERSION: package version string, synced to package.json.
 
 ## Dependencies
 @zakkster/lite-gesture, @zakkster/lite-spring, @zakkster/lite-keyframe,
@@ -41,5 +42,8 @@ currentY = targetY (no spring). Change feel via `preset` option or inject a spri
 
 ## Conventions
 ESM only, type: module. node:test only. ASCII-only source. Zero per-frame heap
-allocation; getBoundingClientRect only in measure(). Everything external is
-injectable for headless tests. MIT (c) Zahary Shinikchiev.
+allocation; measure() reads layout only (offsetParent/offsetTop chain +
+offsetHeight, transform-immune; getBoundingClientRect is the opt-in
+`measure:'rect'` control). Everything external is injectable for headless tests.
+Proven by `npm run torture` (node --expose-gc test/torture.mjs). MIT (c) Zahary
+Shinikchiev.

@@ -29,6 +29,10 @@ export class MetricsCache {
      * @param {boolean} [options.observe=false] - attach a ResizeObserver
      * @param {Function} [options.ResizeObserverCtor] - RO constructor (DI)
      * @param {Function} [options.onResize] - called after an auto re-measure
+     * @param {string}  [options.measure] - 'rect' forces the legacy
+     *                  getBoundingClientRect source (test-only control that
+     *                  reproduces the v1.0.0 transform pollution). Any other
+     *                  value uses the default offsetTop-chain source.
      */
     constructor(elements, win, options = {}) {
         this.elements = elements;
@@ -39,6 +43,7 @@ export class MetricsCache {
         this.bounds = new Float32Array(this.count * 2);
 
         this._onResize = options.onResize || null;
+        this._measure = options.measure || null;
         this._ro = null;
 
         const ROCtor = options.ResizeObserverCtor
@@ -58,8 +63,35 @@ export class MetricsCache {
     }
 
     /**
+     * Accumulates an element's absolute document-Y top by walking the
+     * offsetParent chain and summing offsetTop. This is LAYOUT space, so a live
+     * transform on the element (scale/translate) never leaks into the number --
+     * the fix for SR-01, see decisions/0001-measurement.md. When offsetParent is
+     * null the loop naturally reduces to (el.offsetTop || 0). Allocation-free.
+     */
+    _absoluteTop(el) {
+        let top = 0;
+        let node = el;
+        while (node) {
+            const t = node.offsetTop;
+            // Fail closed: a non-finite offsetTop anywhere in the chain is an
+            // unverified layout state. Do NOT under-count by treating it as 0
+            // (null is not zero) -- return NaN so measure() skips this element,
+            // matching the whole-element offsetHeight skip.
+            if (typeof t !== 'number' || !isFinite(t)) return NaN;
+            top += t;
+            node = node.offsetParent;
+        }
+        return top;
+    }
+
+    /**
      * Recomputes all bounds. Read-only with respect to layout (a single batched
      * reflow), so it does not thrash. Call on load and on resize.
+     *
+     * Default source is the offsetTop chain + offsetHeight (transform-immune).
+     * options.measure === 'rect' selects the legacy getBoundingClientRect source,
+     * kept only as a test-only control.
      */
     measure() {
         const win = this.win;
@@ -69,15 +101,31 @@ export class MetricsCache {
         const viewportHeight = win.innerHeight;
         const elements = this.elements;
         const bounds = this.bounds;
+        const rectMode = this._measure === 'rect';
 
         for (let i = 0; i < this.count; i++) {
             const el = elements[i];
             if (!el) continue;
 
-            const rect = el.getBoundingClientRect();
-            const absoluteTop = rect.top + scrollY;
+            let absoluteTop;
+            let height;
 
-            writeIntersectionBounds(bounds, i * 2, absoluteTop, rect.height, viewportHeight);
+            if (rectMode) {
+                // Legacy path: transform-polluted, reproduces the v1.0.0 bug.
+                const rect = el.getBoundingClientRect();
+                absoluteTop = rect.top + scrollY;
+                height = rect.height;
+            } else {
+                // Fail closed: a missing or non-finite offsetHeight is an
+                // unverified layout state. Do NOT fabricate a zero (null is not
+                // zero) -- skip the element and leave its prior bounds intact.
+                height = el.offsetHeight;
+                if (typeof height !== 'number' || !isFinite(height)) continue;
+                absoluteTop = this._absoluteTop(el);
+                if (!isFinite(absoluteTop)) continue; // non-finite offsetTop chain
+            }
+
+            writeIntersectionBounds(bounds, i * 2, absoluteTop, height, viewportHeight);
         }
     }
 

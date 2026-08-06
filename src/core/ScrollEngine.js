@@ -61,7 +61,24 @@ export class ScrollEngine {
             doc: options.doc
         });
 
-        const preset = springPreset[options.preset] || springPreset.gentle;
+        // Fail closed on an actual typo: a preset key that was PROVIDED but does
+        // not exist is a misconfiguration, not a request for the default -- a
+        // silent gentle fallback would hide it forever. Absent/undefined preset
+        // still defaults to gentle without throwing.
+        let preset;
+        if (options.preset == null) {
+            preset = springPreset.gentle;
+        } else if (Object.prototype.hasOwnProperty.call(springPreset, options.preset)) {
+            // Own-property check only: springPreset[options.preset] would walk the
+            // prototype chain, so 'constructor'/'__proto__'/'toString'/... resolve
+            // to truthy inherited members, slip the guard, and yield a NaN spring.
+            preset = springPreset[options.preset];
+        } else {
+            throw new RangeError(
+                'ScrollEngine: unknown spring preset "' + options.preset +
+                '". Valid presets: ' + Object.keys(springPreset).join(', ') + '.'
+            );
+        }
         this.spring = options.spring || new Spring(preset[0], preset[1], 0);
 
         this._subscribers = [];
@@ -73,9 +90,41 @@ export class ScrollEngine {
 
         const matchMedia = options.matchMedia
             || (win && typeof win.matchMedia === 'function' ? win.matchMedia.bind(win) : null);
-        this._reducedMotion = (typeof options.reducedMotion === 'boolean')
-            ? options.reducedMotion
-            : (matchMedia ? !!matchMedia('(prefers-reduced-motion: reduce)').matches : false);
+
+        // Keep the MQL object live so prefers-reduced-motion changes are honored
+        // mid-session, not just at construction. A forced boolean has no live
+        // query, so no listener is attached.
+        this._mql = null;
+        this._onMotionChange = null;
+
+        if (typeof options.reducedMotion === 'boolean') {
+            this._reducedMotion = options.reducedMotion;
+        } else if (matchMedia) {
+            const mql = matchMedia('(prefers-reduced-motion: reduce)');
+            this._mql = mql;
+            this._reducedMotion = !!(mql && mql.matches);
+
+            // Snap the spring on every transition so it never resumes from a
+            // stale value. Entering reduced motion: snap to the target so a
+            // mid-flight spring stops easing the instant the user asks. Leaving
+            // it: snap to the live on-screen position (currentY) so smoothing
+            // resumes from where the page actually is, not from a value frozen
+            // at the enable moment -- otherwise the next _tick jumps backward.
+            this._onMotionChange = (e) => {
+                const enabled = !!(e && e.matches);
+                this._reducedMotion = enabled;
+                if (enabled) {
+                    this.spring?.snap?.(this.input ? this.input.targetY : 0);
+                } else {
+                    this.spring?.snap?.(this.currentY);
+                }
+            };
+            if (mql && typeof mql.addEventListener === 'function') {
+                mql.addEventListener('change', this._onMotionChange);
+            }
+        } else {
+            this._reducedMotion = false;
+        }
 
         // Native rAF/cAF must be invoked with `this` === the global object. Called
         // off a class property they lose that receiver and throw "Illegal invocation"
@@ -160,8 +209,26 @@ export class ScrollEngine {
         this.isActive = false;
         if (this._cancelRaf && this._rafHandle) this._cancelRaf(this._rafHandle);
         this._rafHandle = 0;
-        this._subscribers.length = 0;
+
+        // Ownership: the engine tears down every renderer addRenderer received,
+        // symmetric with calling resize() on registration. Detach observers and
+        // listeners BEFORE dropping refs -- order matters. See decisions/0002.
+        const subs = this._subscribers;
+        for (let i = 0; i < subs.length; i++) {
+            const r = subs[i];
+            if (r && typeof r.destroy === 'function') r.destroy();
+        }
+        subs.length = 0;
+
+        // Detach the live reduced-motion listener before dropping its refs.
+        if (this._mql && this._onMotionChange && typeof this._mql.removeEventListener === 'function') {
+            this._mql.removeEventListener('change', this._onMotionChange);
+        }
+        this._mql = null;
+        this._onMotionChange = null;
+
         if (this.input && typeof this.input.destroy === 'function') this.input.destroy();
         this.input = null;
+        this.spring = null;
     }
 }

@@ -118,3 +118,6 @@ export function computeProgress(currentY: number, startY: number, endY: number):
 
 /** Symmetric parallax offset: 0 -> +intensity, 0.5 -> 0, 1 -> -intensity. */
 export function computeParallaxOffset(progress: number, intensity: number): number;
+
+/** Package version, string-synced to package.json. */
+export const VERSION: string;

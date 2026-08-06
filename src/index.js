@@ -17,3 +17,10 @@ export {
     computeProgress,
     computeParallaxOffset
 } from './spatial/MathMap.js';
+
+/**
+ * Package version, string-synced to package.json. Copied inline -- nothing at
+ * runtime reads it; the release gate asserts VERSION === package.json.version
+ * by exact string compare, so this line is a version site.
+ */
+export const VERSION = '1.0.1';

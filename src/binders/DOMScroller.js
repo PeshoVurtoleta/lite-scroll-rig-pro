@@ -42,6 +42,8 @@ export class DOMScroller {
      * @param {Window}  [options.win] - forwarded to MetricsCache
      * @param {boolean} [options.observe=false] - auto-invalidate on element resize
      * @param {Function}[options.ResizeObserverCtor] - forwarded to MetricsCache
+     * @param {string}  [options.measure] - forwarded to MetricsCache ('rect' =
+     *                  legacy gBCR source; test-only control)
      */
     constructor(elements, pool, options = {}) {
         this.elements = elements;
@@ -53,6 +55,7 @@ export class DOMScroller {
         this.cache = new MetricsCache(elements, options.win, {
             observe: !!options.observe,
             ResizeObserverCtor: options.ResizeObserverCtor,
+            measure: options.measure,
             onResize: () => this._invalidate()
         });
     }
@@ -90,6 +93,7 @@ export class DOMScroller {
     }
 
     destroy() {
+        if (!this.cache) return; // idempotent: a second call is a no-op
         this.cache.destroy();
         if (this.binder && typeof this.binder.destroy === 'function') this.binder.destroy();
         this.elements = null;

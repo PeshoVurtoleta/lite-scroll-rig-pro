@@ -1,6 +1,6 @@
 {
   "name": "@zakkster/lite-scroll-rig-pro",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Zero-GC scroll-driven transform rig. Spring-smoothed virtual scroll, pre-measured intersection bounds, keyframed matrix3d batched to the DOM. Built for 16ms frame budgets and long-running sessions.",
   "author": "Zahary Shinikchiev <shinikchiev@yahoo.com>",
   "license": "MIT",
@@ -24,10 +24,11 @@
     "CHANGELOG.md"
   ],
   "scripts": {
-    "test": "node --test --test-reporter=spec",
-    "test:gc": "node --expose-gc --test --test-reporter=spec",
-    "test:coverage": "c8 node --test",
-    "verify": "npm test"
+    "test": "node --expose-gc --test --test-reporter=spec test/*.test.js",
+    "test:coverage": "c8 node --expose-gc --test test/*.test.js",
+    "torture": "node --expose-gc test/torture.mjs",
+    "verify": "npm test && npm run torture",
+    "prepublishOnly": "npm run verify"
   },
   "keywords": [
     "scroll",
@@ -70,9 +71,10 @@
     "@zakkster/lite-spring": "^1.0.0",
     "@zakkster/lite-keyframe": "^1.0.1",
     "@zakkster/lite-dom-binder": "^1.0.1",
-    "@zakkster/lite-lerp": "^1.0.0"
+    "@zakkster/lite-lerp": "^1.3.0"
   },
   "devDependencies": {
+    "@zakkster/lite-gc-profiler": "^1.15.0",
     "c8": "^11.0.0"
   }
 }

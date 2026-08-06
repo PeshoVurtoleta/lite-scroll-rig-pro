@@ -38,7 +38,7 @@ const near = (a, b, eps = 1e-4) => Math.abs(a - b) < eps;
 
 test('render maps progress -> keyframe tracks -> matrix at t=0.5', () => {
     const binder = fakeBinder();
-    const ds = new DOMScroller([fakeEl(1000, 200)], fakePool, { binder, win: fakeWin(0, 800) });
+    const ds = new DOMScroller([fakeEl(1000, 200)], fakePool, { binder, win: fakeWin(0, 800), measure: 'rect' });
     ds.resize(); // bounds: enter 200, exit 1200
 
     ds.render(700); // t = (700-200)/1000 = 0.5
@@ -57,7 +57,7 @@ test('render maps progress -> keyframe tracks -> matrix at t=0.5', () => {
 
 test('progress clamps below the enter bound and above the exit bound', () => {
     const binder = fakeBinder();
-    const ds = new DOMScroller([fakeEl(1000, 200)], fakePool, { binder, win: fakeWin(0, 800) });
+    const ds = new DOMScroller([fakeEl(1000, 200)], fakePool, { binder, win: fakeWin(0, 800), measure: 'rect' });
     ds.resize();
 
     ds.render(50);   // below enter -> t=0 -> tx = row0 + 0 = 0
@@ -69,7 +69,7 @@ test('progress clamps below the enter bound and above the exit bound', () => {
 
 test('two entities are packed at 16-float strides', () => {
     const binder = fakeBinder();
-    const ds = new DOMScroller([fakeEl(0, 800), fakeEl(2000, 200)], fakePool, { binder, win: fakeWin(0, 800) });
+    const ds = new DOMScroller([fakeEl(0, 800), fakeEl(2000, 200)], fakePool, { binder, win: fakeWin(0, 800), measure: 'rect' });
     ds.resize();
     ds.render(500);
 
@@ -82,7 +82,7 @@ test('two entities are packed at 16-float strides', () => {
 
 test('resize re-measures and invalidates the binder', () => {
     const binder = fakeBinder();
-    const ds = new DOMScroller([fakeEl(1000, 200)], fakePool, { binder, win: fakeWin(0, 800) });
+    const ds = new DOMScroller([fakeEl(1000, 200)], fakePool, { binder, win: fakeWin(0, 800), measure: 'rect' });
     const before = binder.invalidateCount;
     ds.resize();
     assert.ok(binder.invalidateCount > before);
@@ -93,7 +93,7 @@ test('ResizeObserver triggering re-measures and invalidates', () => {
     const binder = fakeBinder();
     const el = fakeEl(1000, 200);
     const ds = new DOMScroller([el], fakePool, {
-        binder, win: fakeWin(0, 800), observe: true, ResizeObserverCtor: FakeRO
+        binder, win: fakeWin(0, 800), observe: true, ResizeObserverCtor: FakeRO, measure: 'rect'
     });
 
     assert.ok(ds.cache._ro instanceof FakeRO);

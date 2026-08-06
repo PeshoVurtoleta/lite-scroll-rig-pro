@@ -23,21 +23,21 @@ class FakeRO {
 }
 
 test('measures absolute bounds from rects + scroll offset', () => {
-    const cache = new MetricsCache([fakeEl(1000, 200)], fakeWin(0, 800));
+    const cache = new MetricsCache([fakeEl(1000, 200)], fakeWin(0, 800), { measure: 'rect' });
     cache.measure();
     assert.equal(cache.bounds[0], 200);
     assert.equal(cache.bounds[1], 1200);
 });
 
 test('scrollY is folded into absoluteTop', () => {
-    const cache = new MetricsCache([fakeEl(200, 200)], fakeWin(800, 800));
+    const cache = new MetricsCache([fakeEl(200, 200)], fakeWin(800, 800), { measure: 'rect' });
     cache.measure();
     assert.equal(cache.bounds[0], 200);
     assert.equal(cache.bounds[1], 1200);
 });
 
 test('packs multiple elements with stride 2', () => {
-    const cache = new MetricsCache([fakeEl(1000, 200), fakeEl(2000, 100)], fakeWin(0, 800));
+    const cache = new MetricsCache([fakeEl(1000, 200), fakeEl(2000, 100)], fakeWin(0, 800), { measure: 'rect' });
     cache.measure();
     assert.equal(cache.bounds.length, 4);
     assert.equal(cache.bounds[0], 200);
@@ -49,7 +49,7 @@ test('packs multiple elements with stride 2', () => {
 test('re-measure reflects changed layout', () => {
     const rect = { top: 1000, height: 200 };
     const el = { getBoundingClientRect: () => rect };
-    const cache = new MetricsCache([el], fakeWin(0, 800));
+    const cache = new MetricsCache([el], fakeWin(0, 800), { measure: 'rect' });
     cache.measure();
     assert.equal(cache.bounds[0], 200);
 
@@ -60,7 +60,7 @@ test('re-measure reflects changed layout', () => {
 });
 
 test('null elements are skipped without throwing', () => {
-    const cache = new MetricsCache([null, fakeEl(1000, 200)], fakeWin(0, 800));
+    const cache = new MetricsCache([null, fakeEl(1000, 200)], fakeWin(0, 800), { measure: 'rect' });
     assert.doesNotThrow(() => cache.measure());
     assert.equal(cache.bounds[2], 200);
     assert.equal(cache.bounds[3], 1200);
@@ -84,7 +84,7 @@ test('a ResizeObserver callback re-measures and fires onResize', () => {
     const el = { getBoundingClientRect: () => rect };
     let resizeCalls = 0;
     const cache = new MetricsCache([el], fakeWin(0, 800), {
-        observe: true, ResizeObserverCtor: FakeRO, onResize: () => { resizeCalls++; }
+        observe: true, ResizeObserverCtor: FakeRO, measure: 'rect', onResize: () => { resizeCalls++; }
     });
 
     rect.top = 1500;      // element moved (e.g. image above it loaded)
