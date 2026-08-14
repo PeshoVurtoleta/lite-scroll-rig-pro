@@ -4,6 +4,40 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.1.0]
+
+Native scroll reconciliation and keyboard access, both entirely on the cold path.
+
+### Added
+- **Native scroll reconciliation (native wins).** `ScrollEngine` now binds a
+  passive `scroll` listener to the window. Because the rig is transform-only (it
+  never calls `window.scrollTo`), any native scroll is FOREIGN: the engine
+  reconciles the input target to `window.scrollY` (native wins over the rig's
+  in-flight value). A foreign jump of `200 px` or more also snaps the spring, so
+  a scrollbar drag or an in-page anchor jump lands in one frame instead of easing
+  across the whole page; smaller deltas let the spring chase. `VirtualScroll`
+  gains `setTargetY(y)` -- a clamped, allocation-free absolute setter -- and a
+  `_lastNativeY` baseline that is the self-vs-foreign seam for a future deferred
+  `nativeSync`. See `decisions/0003-native-reconciliation.md`.
+- **Keyboard scrolling (on by default).** A window `keydown` listener drives
+  `ArrowUp`/`ArrowDown` (+/-40 px), `PageUp`/`PageDown` and `Space`/`Shift+Space`
+  (+/-`0.9 * innerHeight`), `Home` (top), and `End` (`maxScroll`). Focus in an
+  interactive control (`INPUT`, `TEXTAREA`, `SELECT`, `BUTTON`, or
+  `contenteditable`) is suppressed -- the rig never steals those keys. The
+  browser's own keyboard scroll is `preventDefault`-ed only when the rig owns the
+  event target, so it cannot double-count on top of the rig's step. Opt out with
+  `{ keyboard: false }` (native reconciliation stays on).
+- `ScrollEngineOptions.keyboard` in the TypeScript definitions.
+- `decisions/0003-native-reconciliation.md`.
+
+### Changed
+- `ScrollEngine.destroy()` now detaches the `scroll` and `keydown` window
+  listeners before nulling the refs they close over, symmetric with the existing
+  reduced-motion listener teardown.
+- The torture gate (`test/torture.mjs`) gains a tier asserting 4096 combined
+  scroll + keydown dispatches allocate 0 B/op; the hot bodies (`_tick`,
+  `render`) are unchanged and still 0 B/op.
+
 ## [1.0.1]
 
 Measurement integrity, ownership, and honest gates.

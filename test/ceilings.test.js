@@ -64,6 +64,31 @@ test('_tick() allocates 0 B/op in steady state over 10000 frames', { skip }, () 
         '_tick() allocated ' + result.bytesPerCall + ' B/call');
 });
 
+test('scroll + keydown dispatch allocates 0 B/op over 4096 dispatches', { skip }, () => {
+    // SR1 cold-path budget: the native-scroll reconciler and the keyboard handler
+    // must not allocate. Handlers are invoked directly with a reused event object
+    // so the measurement captures the handler cost, not the fake event's.
+    const input = fakeInput(0, 1e9);
+    const spring = fakeSpring(500);
+    const win = { scrollY: 0, innerHeight: 800 };
+
+    const engine = new ScrollEngine(null, { input, spring, win, raf: () => 1, cancelRaf: () => {} });
+    const kev = { key: 'ArrowDown', shiftKey: false, target: { tagName: 'DIV' }, cancelable: false };
+
+    let y = 0;
+    const op = () => {
+        y = y === 0 ? 100 : 0;   // alternate so the reconciler always does work
+        win.scrollY = y;
+        engine._onNativeScroll();
+        engine._onKeyDown(kev);
+    };
+    // 512 * 8 = 4096 combined dispatches.
+    const result = measureAllocs(op, { iterations: 512, batches: 8 });
+    const report = checkAllocs(result, { maxBytesPerCall: 0 });
+    assert.equal(report.verdict, 'pass',
+        'scroll+keydown dispatch allocated ' + result.bytesPerCall + ' B/call');
+});
+
 test('x4096 engine create/addRenderer/destroy leaves no live observers, no heap creep', () => {
     // SR-03 retention proof. lite-leak ^1.9.0 is unpublished (registry max
     // 1.8.1), so this uses the sanctioned manual gc heap-delta probe instead:

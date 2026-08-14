@@ -115,6 +115,87 @@ test('setMaxScroll re-clamps a now-out-of-range target', () => {
     assert.equal(vs.targetY, 500);
 });
 
+test('setTargetY sets an absolute, clamped target', () => {
+    const { vs } = makeVS({ maxScroll: 500 });
+    vs.setTargetY(300);
+    assert.equal(vs.targetY, 300);
+    vs.setTargetY(9999);
+    assert.equal(vs.targetY, 500, 'clamped to the ceiling');
+    vs.setTargetY(-50);
+    assert.equal(vs.targetY, 0, 'clamped to the floor');
+});
+
+test('setTargetY rejects NaN and leaves the prior target intact (null is not zero)', () => {
+    const { vs } = makeVS({ maxScroll: 500 });
+    vs.setTargetY(200);
+    vs.setTargetY(NaN);
+    assert.equal(vs.targetY, 200, 'a NaN input never fabricates a scroll to 0');
+    vs.setTargetY(0 / 0);
+    assert.equal(vs.targetY, 200);
+});
+
+// --- QA boundary pass: setTargetY's non-finite / non-numeric inputs. This is
+//     a "new entry point" this session (decisions/0003) so the full matrix
+//     applies: Infinity, -Infinity, a very large finite y, -0, null,
+//     undefined. ---
+
+test('setTargetY(+Infinity) clamps to maxScroll, never Infinity', () => {
+    const { vs } = makeVS({ maxScroll: 500 });
+    vs.setTargetY(Infinity);
+    assert.equal(vs.targetY, 500);
+    assert.ok(Number.isFinite(vs.targetY));
+});
+
+test('setTargetY(-Infinity) clamps to 0, never -Infinity', () => {
+    const { vs } = makeVS({ maxScroll: 500 });
+    vs.setTargetY(-Infinity);
+    assert.equal(vs.targetY, 0);
+    assert.ok(Number.isFinite(vs.targetY));
+});
+
+test('setTargetY(very large finite y) clamps to maxScroll', () => {
+    const { vs } = makeVS({ maxScroll: 500 });
+    vs.setTargetY(Number.MAX_SAFE_INTEGER);
+    assert.equal(vs.targetY, 500);
+});
+
+test('setTargetY(-0) does not throw and settles at a value numerically == 0 (assert.strictEqual uses Object.is, so compare loosely)', () => {
+    const { vs } = makeVS({ maxScroll: 500 });
+    vs.setTargetY(200);
+    assert.doesNotThrow(() => vs.setTargetY(-0));
+    // -0 fails the -0<0 clamp check (false) the same way +0 does, so it is
+    // never coerced to +0 by the clamp; assert numeric equality (== 0), not
+    // Object.is identity, since node:assert/strict distinguishes -0 from 0.
+    assert.ok(vs.targetY == 0, 'numerically the floor'); // eslint-disable-line eqeqeq
+    assert.ok(Number.isFinite(vs.targetY));
+});
+
+// FAIL (real defect, reported to the coder -- not fixed here): the guard on
+// line "if (y !== y) return;" only rejects NaN. null and undefined are NOT
+// NaN by that check (null !== null -> false, undefined !== undefined ->
+// false), so both fall through the relational clamp comparisons (which
+// coerce null/undefined-vs-number comparisons to false) UNCHANGED, and are
+// assigned directly to targetY as non-numeric values. This violates the
+// project's fail-closed law ("null is not zero") and this same session's own
+// planner assertion for setTargetY ("rejects NaN ... leaves targetY
+// unchanged -- null is not zero"), which by construction must also reject
+// null/undefined, not merely NaN.
+test('FAIL-CLOSED (currently broken): setTargetY(null) must leave targetY unchanged, not become null', () => {
+    const { vs } = makeVS({ maxScroll: 500 });
+    vs.setTargetY(200);
+    vs.setTargetY(null);
+    assert.equal(vs.targetY, 200, 'a null input is unverified -> must be rejected, not assigned');
+    assert.notEqual(vs.targetY, null);
+});
+
+test('FAIL-CLOSED (currently broken): setTargetY(undefined) must leave targetY unchanged, not become undefined', () => {
+    const { vs } = makeVS({ maxScroll: 500 });
+    vs.setTargetY(200);
+    vs.setTargetY(undefined);
+    assert.equal(vs.targetY, 200, 'an undefined input is unverified -> must be rejected, not assigned');
+    assert.notEqual(vs.targetY, undefined);
+});
+
 test('destroy detaches the wheel listener and tears down the tracker', () => {
     const { vs, target } = makeVS();
     const tracker = vs._tracker;

@@ -43,6 +43,16 @@ export class VirtualScroll {
         this.touchMultiplier = touchMultiplier;
 
         this.targetY = 0;
+
+        // Last native window.scrollY the engine reconciled to. The rig is
+        // transform-only (it never calls window.scrollTo), so today every native
+        // scroll is FOREIGN and this only ever advances from the reconciler. It
+        // exists as the self-vs-foreign seam for a future deferred nativeSync:
+        // a scroll the rig itself caused would land here and be ignored as a
+        // no-op. See decisions/0003. null is not zero, but a fresh page sits at
+        // 0, so 0 is the correct verified start.
+        this._lastNativeY = 0;
+
         this.isActive = true;
 
         this._onWheel = this._onWheel.bind(this);
@@ -67,6 +77,24 @@ export class VirtualScroll {
     setMaxScroll(max) {
         this.maxScroll = max;
         this._clampAndApply(0);
+    }
+
+    /**
+     * Set the absolute target, clamped to [0, maxScroll]. A primitive setter for
+     * the cold path (native scroll reconciliation, keyboard) -- it writes one
+     * field, allocates nothing. Distinct from _clampAndApply, which is a relative
+     * delta accumulator for wheel/touch.
+     */
+    setTargetY(y) {
+        // Reject any non-number and NaN: an unverified target is not a scroll to 0
+        // (null/undefined/string would slip the relational clamps and be assigned
+        // raw, poisoning spring.target on the hot path). +/-Infinity passes here
+        // and clamps to maxScroll / 0 via the branches below.
+        if (typeof y !== 'number' || y !== y) return;
+        let v = y;
+        if (v < 0) v = 0;
+        else if (v > this.maxScroll) v = this.maxScroll;
+        this.targetY = v;
     }
 
     _onWheel(e) {

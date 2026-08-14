@@ -29,6 +29,11 @@ import { VirtualScroll } from './VirtualScroll.js';
 
 const DEFAULT_MAX_DT = 0.05; // seconds; ~20fps floor on the spring step
 
+// Native reconciliation + keyboard (cold path only; see decisions/0003).
+const NATIVE_SNAP_PX = 200;     // foreign scroll jump at/above which the spring snaps
+const KEY_LINE_STEP = 40;       // ArrowUp/ArrowDown step (px), matches wheel LINE_STEP
+const KEY_PAGE_FRACTION = 0.9;  // PageUp/PageDown/Space step = 0.9 * innerHeight
+
 export class ScrollEngine {
     /**
      * @param {HTMLElement|Window} target - input target (usually window)
@@ -49,10 +54,14 @@ export class ScrollEngine {
      * @param {number}   [options.touchMultiplier] - forwarded to VirtualScroll
      * @param {Function} [options.createTracker] - forwarded to VirtualScroll
      * @param {Document} [options.doc] - forwarded to VirtualScroll
+     * @param {boolean}  [options.keyboard=true] - bind window keydown scrolling
+     *                   (arrows / page / space / home / end); interactive-element
+     *                   focus is always suppressed. false detaches only keydown.
      */
     constructor(target, options = {}) {
         const win = options.win || (typeof window !== 'undefined' ? window : null);
         this.win = win;
+        this._target = target;
 
         this.input = options.input || new VirtualScroll(target, {
             multiplier: options.multiplier,
@@ -136,6 +145,108 @@ export class ScrollEngine {
             || (typeof cancelAnimationFrame !== 'undefined' ? cancelAnimationFrame.bind(win || globalThis) : null);
         this._rafHandle = 0;
         this._boundTick = this._tick.bind(this);
+
+        // Native reconciliation + keyboard live entirely on the cold path: bound
+        // window listeners that write primitives into input.targetY. The rig is
+        // transform-only (no window.scrollTo), so a native scroll is always
+        // FOREIGN -- the reconciler tracks it (native wins), snapping the spring
+        // past a page-jump. keydown drives step/page/home/end, suppressed when
+        // focus sits in an interactive control. Nothing here touches _tick or
+        // render, so the hot bodies gain zero bytes. See decisions/0003.
+        this._keyboard = options.keyboard !== false;
+        this._boundNativeScroll = this._onNativeScroll.bind(this);
+        this._boundKeyDown = this._onKeyDown.bind(this);
+        this._listening = false;
+        if (win && typeof win.addEventListener === 'function') {
+            win.addEventListener('scroll', this._boundNativeScroll, { passive: true });
+            if (this._keyboard) win.addEventListener('keydown', this._boundKeyDown);
+            this._listening = true;
+        }
+    }
+
+    /**
+     * Foreign native scroll -> reconcile the input target to window.scrollY
+     * (native wins). A jump of NATIVE_SNAP_PX or more also snaps the spring so a
+     * scrollbar drag or an in-page anchor jump lands in one frame instead of
+     * easing across the whole page. Cold path; allocates nothing.
+     */
+    _onNativeScroll() {
+        const input = this.input;
+        const win = this.win;
+        if (!input || !win) return;
+        const y = win.scrollY || 0;
+        const last = input._lastNativeY;
+        // Self-vs-foreign seam: a scroll the rig itself caused (a future deferred
+        // nativeSync via window.scrollTo) would land at _lastNativeY. We never
+        // scrollTo today, so this only skips a redundant re-dispatch of the same
+        // position.
+        if (y === last) return;
+        const d = y - last;
+        input._lastNativeY = y;
+        input.setTargetY(y);
+        if (d >= NATIVE_SNAP_PX || d <= -NATIVE_SNAP_PX) {
+            const spring = this.spring;
+            if (spring && typeof spring.snap === 'function') spring.snap(input.targetY);
+        }
+    }
+
+    /**
+     * True when the event target is a control that consumes its own keys, so the
+     * rig must not steal them (typing in a field, operating a select/button, or
+     * editing contenteditable). Fail closed: a real keydown always carries a
+     * target, so a null/absent one is an unverified state -- treat it as
+     * interactive and suppress, never hijack the keyboard on an event we cannot
+     * verify. null is not zero.
+     */
+    _isInteractive(el) {
+        if (!el) return true;
+        if (el.isContentEditable) return true;
+        const tag = el.tagName;
+        return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON';
+    }
+
+    /**
+     * Whether the rig owns this event's target, gating preventDefault. A
+     * window-scoped rig owns the whole page; an element-scoped rig owns only its
+     * own subtree. Never preventDefault outside the rig target: a nested scroller
+     * the rig does not manage must keep its native keys. See decisions/0003 RISK.
+     */
+    _ownsEvent(e) {
+        const t = this._target;
+        if (!t) return false;
+        if (this.win && t === this.win) return true;
+        const et = e && e.target;
+        if (et === t) return true;
+        return typeof t.contains === 'function' ? !!t.contains(et) : false;
+    }
+
+    /**
+     * Keyboard scrolling. Writes clamped primitives into the input target; never
+     * reads or touches the hot loop. Suppressed entirely when focus is in an
+     * interactive control. preventDefault only when the rig owns the target, so
+     * the browser's own keyboard scroll cannot double-count on top of ours.
+     */
+    _onKeyDown(e) {
+        const input = this.input;
+        if (!input) return;
+        if (this._isInteractive(e.target)) return;
+
+        const win = this.win;
+        const page = (win ? win.innerHeight || 0 : 0) * KEY_PAGE_FRACTION;
+        let handled = true;
+        switch (e.key) {
+            case 'ArrowDown': input.setTargetY(input.targetY + KEY_LINE_STEP); break;
+            case 'ArrowUp':   input.setTargetY(input.targetY - KEY_LINE_STEP); break;
+            case 'PageDown':  input.setTargetY(input.targetY + page); break;
+            case 'PageUp':    input.setTargetY(input.targetY - page); break;
+            case ' ':         input.setTargetY(input.targetY + (e.shiftKey ? -page : page)); break;
+            case 'Home':      input.setTargetY(0); break;
+            case 'End':       input.setTargetY(input.maxScroll); break;
+            default: handled = false;
+        }
+        if (handled && e.cancelable && this._ownsEvent(e) && typeof e.preventDefault === 'function') {
+            e.preventDefault();
+        }
     }
 
     /**
@@ -174,6 +285,9 @@ export class ScrollEngine {
         const startY = this.win ? (this.win.scrollY || 0) : 0;
         this.currentY = startY;
         this.input.targetY = startY;
+        // Seed the reconciler baseline so the first native scroll after start()
+        // measures its foreign delta from where we actually began, not from 0.
+        this.input._lastNativeY = startY;
         if (typeof this.spring.snap === 'function') this.spring.snap(startY);
 
         this.isActive = true;
@@ -226,6 +340,14 @@ export class ScrollEngine {
         }
         this._mql = null;
         this._onMotionChange = null;
+
+        // Detach both window listeners (native scroll + keydown) before nulling
+        // the refs they close over. Order matters -- see decisions/0002, 0003.
+        if (this._listening && this.win && typeof this.win.removeEventListener === 'function') {
+            this.win.removeEventListener('scroll', this._boundNativeScroll);
+            this.win.removeEventListener('keydown', this._boundKeyDown);
+        }
+        this._listening = false;
 
         if (this.input && typeof this.input.destroy === 'function') this.input.destroy();
         this.input = null;

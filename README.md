@@ -130,6 +130,7 @@ Full type definitions ship in [`src/index.d.ts`](src/index.d.ts).
 | `maxDeltaTime`    | `0.05`             | dt clamp in seconds                                          |
 | `getMaxScroll`    | documentElement    | `() => number`; override the scroll ceiling                  |
 | `reducedMotion`   | from `matchMedia`  | force the reduced-motion bypass on/off                       |
+| `keyboard`        | `true`             | bind window keydown scrolling; `false` detaches only keydown |
 | `multiplier`      | `1.2`              | forwarded to `VirtualScroll` (wheel speed)                   |
 | `touchMultiplier` | `1.5`              | forwarded to `VirtualScroll` (touch speed)                   |
 | `input` / `spring` / `win` / `raf` / `cancelRaf` / `matchMedia` | -- | injection points for testing |
@@ -174,7 +175,13 @@ Bounds go stale whenever layout shifts. Two paths keep them fresh:
 
 ## Accessibility
 
-This rig hijacks wheel and touch input (`preventDefault` on wheel), which is inherent to smooth-scroll libraries. It respects `prefers-reduced-motion` out of the box by disabling the spring. It does **not** yet synchronize a native scrollbar or handle keyboard scrolling (arrows, space, page keys, home/end) -- if your context needs those, layer them on top by writing to `engine.input.targetY`. Consider whether hijacked scroll is appropriate for your audience before shipping.
+This rig hijacks wheel and touch input (`preventDefault` on wheel), which is inherent to smooth-scroll libraries. Three behaviors keep it usable rather than trapping:
+
+- **Keyboard scrolling, on by default.** A window `keydown` listener drives the arrow keys (`+/-40 px`), `PageUp` / `PageDown` and `Space` / `Shift+Space` (`+/-0.9 x innerHeight`), `Home` (top), and `End` (bottom). Focus in an interactive control -- `INPUT`, `TEXTAREA`, `SELECT`, `BUTTON`, or `contenteditable` -- suppresses the rig entirely, so typing and control operation are never stolen. The browser's own keyboard scroll is `preventDefault`-ed only when the rig owns the event target, so keys never double-count. Opt out with `{ keyboard: false }` (native scroll reconciliation stays on).
+- **Native scroll reconciliation -- native wins.** A scrollbar drag or an in-page anchor jump (`#section`, `scrollIntoView`) moves the real `window.scrollY`; the rig reconciles its target to that position rather than fighting it. A jump of `200 px` or more snaps the spring so the navigation lands in one frame; smaller moves ease smoothly.
+- **Reduced motion.** `prefers-reduced-motion` disables the spring out of the box (input tracks 1:1), honored live if the setting changes mid-session.
+
+What it does **not** do: the rig is transform-only and never calls `window.scrollTo`, so it has **no scrollbar of its own** and does not synchronize the native scrollbar thumb to the animated position. The native scrollbar reflects the document's real position, not `currentY`. Still consider whether hijacked scroll is appropriate for your audience before shipping.
 
 ---
 

@@ -38,6 +38,13 @@ export interface ScrollEngineOptions extends VirtualScrollOptions {
     getMaxScroll?: () => number;
     /** Force reduced motion on/off; otherwise derived from prefers-reduced-motion. */
     reducedMotion?: boolean;
+    /**
+     * Bind window keydown scrolling (arrows / page keys / space / home / end).
+     * Default true. Interactive-element focus is always suppressed; setting this
+     * false detaches only the keydown listener, native scroll reconciliation
+     * stays on. The native scrollbar is never synchronized (transform-only rig).
+     */
+    keyboard?: boolean;
     input?: unknown;
     spring?: unknown;
     win?: Window;

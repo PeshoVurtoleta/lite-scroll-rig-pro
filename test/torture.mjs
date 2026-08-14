@@ -11,6 +11,8 @@
  *
  *     T0 alloc      DOMScroller.render() (n = 8/64/256) and ScrollEngine._tick()
  *                   at 0 B/op in steady state
+ *     T0b dispatch  4096 combined native-scroll + keydown dispatches at 0 B/op
+ *                   (SR1 cold-path handlers)
  *     T1 retention  4096x engine create/addRenderer/destroy: zero live
  *                   ResizeObservers and a bounded heap delta (SR-03). lite-leak
  *                   ^1.9.0 is unpublished (registry max 1.8.1), so the retention
@@ -83,6 +85,30 @@ function t0Alloc() {
     sink.length = 0;
 }
 
+// --- T0b: the cold-path event handlers allocate zero bytes per dispatch ------
+function t0Dispatch() {
+    const input = fakeInput(0, 1e9);
+    const spring = fakeSpring(500);
+    const win = { scrollY: 0, innerHeight: 800 };
+    const engine = new ScrollEngine(null, { input, spring, win, raf: () => 1, cancelRaf: () => {} });
+
+    // A reused event object so the measurement captures the handler cost, not the
+    // event allocation. cancelable:false keeps the preventDefault branch cold.
+    const kev = { key: 'ArrowDown', shiftKey: false, target: { tagName: 'DIV' }, cancelable: false };
+    let y = 0;
+    const op = () => {
+        y = y === 0 ? 100 : 0;      // alternate so the reconciler always does work
+        win.scrollY = y;
+        engine._onNativeScroll();
+        engine._onKeyDown(kev);
+    };
+    // 512 * 8 = 4096 combined scroll + keydown dispatches.
+    const result = measureAllocs(op, { iterations: 512, batches: 8 });
+    if (checkAllocs(result, { maxBytesPerCall: 0 }).verdict !== 'pass') {
+        die('T0 alloc: scroll+keydown dispatch allocated ' + result.bytesPerCall + ' B/call');
+    }
+}
+
 // --- T1: create/addRenderer/destroy leaks no observers, no heap -------------
 function t1Retention() {
     const ROCtor = makeCountingRO();
@@ -126,6 +152,7 @@ function main() {
     }
 
     t0Alloc();
+    t0Dispatch();
     t1Retention();
 
     // T2 control: with BREAK set, T0's allocating binder must already have tripped

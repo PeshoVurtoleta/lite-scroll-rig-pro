@@ -120,14 +120,85 @@ export function makeCountingRO() {
 // --- input / spring / raf / renderer / binder / pool fakes (shape-compatible
 //     with the ad-hoc fakes already used across the suite) --------------------
 
-export function fakeInput(targetY = 0) {
+export function fakeInput(targetY = 0, maxScroll = Infinity) {
     return {
         targetY,
+        maxScroll,
+        _lastNativeY: 0,
         maxSet: null,
         destroyed: false,
-        setMaxScroll(m) { this.maxSet = m; },
+        setMaxScroll(m) { this.maxSet = m; this.maxScroll = m; },
+        // Clamped absolute setter, mirrors VirtualScroll.setTargetY: rejects any
+        // non-number and NaN; +/-Infinity passes and clamps.
+        setTargetY(y) {
+            if (typeof y !== 'number' || y !== y) return;
+            let v = y;
+            if (v < 0) v = 0;
+            else if (v > this.maxScroll) v = this.maxScroll;
+            this.targetY = v;
+        },
         destroy() { this.destroyed = true; }
     };
+}
+
+/**
+ * A fake window/target with an addEventListener surface for the native-scroll
+ * and keydown paths. Tracks listener counts per type (so a test can assert 0
+ * after destroy), and emits synthetic events:
+ *   emitScroll(y?)      - optionally moves scrollY, then dispatches 'scroll'
+ *   emitKey(key, opts)  - dispatches a 'keydown' with { key, shiftKey, target,
+ *                         cancelable }; returns the event so a test can read
+ *                         its _prevented flag.
+ *
+ * @param {object} [init] - { scrollY, innerHeight }
+ */
+export function fakeTarget(init = {}) {
+    const listeners = new Map(); // type -> Set<fn>
+    const t = {
+        scrollY: init.scrollY || 0,
+        innerHeight: init.innerHeight != null ? init.innerHeight : 800,
+        addEventListener(type, fn) {
+            let s = listeners.get(type);
+            if (!s) { s = new Set(); listeners.set(type, s); }
+            s.add(fn);
+        },
+        removeEventListener(type, fn) {
+            const s = listeners.get(type);
+            if (s) s.delete(fn);
+        },
+        listenerCount(type) {
+            if (type == null) {
+                let n = 0;
+                for (const s of listeners.values()) n += s.size;
+                return n;
+            }
+            const s = listeners.get(type);
+            return s ? s.size : 0;
+        },
+        emitScroll(y) {
+            if (y != null) t.scrollY = y;
+            const s = listeners.get('scroll');
+            if (s) for (const fn of s) fn({ type: 'scroll' });
+        },
+        emitKey(key, opts = {}) {
+            // A real window keydown always carries a target; default to a
+            // non-interactive stand-in. Pass target:null explicitly to exercise
+            // the fail-closed suppression.
+            const e = {
+                type: 'keydown',
+                key,
+                shiftKey: !!opts.shiftKey,
+                target: 'target' in opts ? opts.target : { tagName: 'DIV' },
+                cancelable: opts.cancelable !== false,
+                _prevented: false,
+                preventDefault() { this._prevented = true; }
+            };
+            const s = listeners.get('keydown');
+            if (s) for (const fn of s) fn(e);
+            return e;
+        }
+    };
+    return t;
 }
 
 // Fake spring: update() returns a sentinel distinct from target, proving the

@@ -1,6 +1,6 @@
 {
   "name": "@zakkster/lite-scroll-rig-pro",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Zero-GC scroll-driven transform rig. Spring-smoothed virtual scroll, pre-measured intersection bounds, keyframed matrix3d batched to the DOM. Built for 16ms frame budgets and long-running sessions.",
   "author": "Zahary Shinikchiev <shinikchiev@yahoo.com>",
   "license": "MIT",
