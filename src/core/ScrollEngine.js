@@ -34,6 +34,17 @@ const NATIVE_SNAP_PX = 200;     // foreign scroll jump at/above which the spring
 const KEY_LINE_STEP = 40;       // ArrowUp/ArrowDown step (px), matches wheel LINE_STEP
 const KEY_PAGE_FRACTION = 0.9;  // PageUp/PageDown/Space step = 0.9 * innerHeight
 
+// Idle discipline: park the rAF loop when settled, wake on input. See
+// decisions/0004-park-wake.md. A frame counts as settled when the on-screen
+// value is within SETTLE_EPS_PX of the target AND the spring velocity is under
+// SETTLE_VEL (a non-finite velocity fails the comparison, so it is NEVER
+// settled -- fail closed). After SETTLE_N consecutive settled frames the loop
+// parks. Tight enough that a sub-pixel drift never reads as motion; loose
+// enough that a genuinely resting spring parks within a few frames.
+const SETTLE_EPS_PX = 0.05;
+const SETTLE_VEL = 0.5;
+const SETTLE_N = 3;
+
 export class ScrollEngine {
     /**
      * @param {HTMLElement|Window} target - input target (usually window)
@@ -57,6 +68,10 @@ export class ScrollEngine {
      * @param {boolean}  [options.keyboard=true] - bind window keydown scrolling
      *                   (arrows / page / space / home / end); interactive-element
      *                   focus is always suppressed. false detaches only keydown.
+     * @param {boolean}  [options.park=true] - park the rAF loop when the spring
+     *                   settles and wake it on input (wheel/touch/keyboard/native
+     *                   scroll/resize/RO). false keeps the loop running every
+     *                   frame. See decisions/0004-park-wake.md.
      */
     constructor(target, options = {}) {
         const win = options.win || (typeof window !== 'undefined' ? window : null);
@@ -96,6 +111,19 @@ export class ScrollEngine {
         this._lastTime = 0;
         this._maxDeltaTime = options.maxDeltaTime != null ? options.maxDeltaTime : DEFAULT_MAX_DT;
         this._getMaxScroll = options.getMaxScroll || null;
+
+        // Idle discipline (SR-05). Preallocated so _tick only ever reads/writes
+        // existing fields -- no shape change on the hot path. isParked is public
+        // for a HUD. _settle counts consecutive settled frames; _wakePending
+        // guards the re-entrant race where wake() is called from inside a
+        // renderer's render() during this same tick (the event-before-rAF case is
+        // already covered by wake() zeroing _settle). park is on by default;
+        // { park: false } keeps the loop always running.
+        this.isParked = false;
+        this._settle = 0;
+        this._wakePending = false;
+        this._lastTargetY = 0;
+        this._parkEnabled = options.park !== false;
 
         const matchMedia = options.matchMedia
             || (win && typeof win.matchMedia === 'function' ? win.matchMedia.bind(win) : null);
@@ -146,6 +174,14 @@ export class ScrollEngine {
         this._rafHandle = 0;
         this._boundTick = this._tick.bind(this);
 
+        // Wake hook. VirtualScroll calls input._onInput() after any targetY
+        // change (wheel/touch/setTargetY), so wheel and touch wake a parked
+        // engine without the engine listening for those events itself. Native
+        // scroll, keyboard, resize, addRenderer, and RO invalidation call wake()
+        // directly. All cold path -- wake() only schedules a frame when parked.
+        this._boundWake = this.wake.bind(this);
+        if (this.input) this.input._onInput = this._boundWake;
+
         // Native reconciliation + keyboard live entirely on the cold path: bound
         // window listeners that write primitives into input.targetY. The rig is
         // transform-only (no window.scrollTo), so a native scroll is always
@@ -188,6 +224,7 @@ export class ScrollEngine {
             const spring = this.spring;
             if (spring && typeof spring.snap === 'function') spring.snap(input.targetY);
         }
+        this.wake();
     }
 
     /**
@@ -244,8 +281,11 @@ export class ScrollEngine {
             case 'End':       input.setTargetY(input.maxScroll); break;
             default: handled = false;
         }
-        if (handled && e.cancelable && this._ownsEvent(e) && typeof e.preventDefault === 'function') {
-            e.preventDefault();
+        if (handled) {
+            this.wake();
+            if (e.cancelable && this._ownsEvent(e) && typeof e.preventDefault === 'function') {
+                e.preventDefault();
+            }
         }
     }
 
@@ -255,7 +295,17 @@ export class ScrollEngine {
      */
     addRenderer(renderer) {
         this._subscribers.push(renderer);
-        if (typeof renderer.resize === 'function') renderer.resize();
+        // Wake wiring: a renderer that invalidates asynchronously (e.g. a
+        // DOMScroller whose ResizeObserver fires on a late image load) must be
+        // able to wake a parked engine so the new bounds actually render. If the
+        // renderer exposes the _onInvalidate seam, route it to wake. Cold path.
+        if (renderer && Object.prototype.hasOwnProperty.call(renderer, '_onInvalidate')) {
+            renderer._onInvalidate = this._boundWake;
+        }
+        if (typeof renderer.resize === 'function') {
+            renderer.resize();
+            this.wake(); // registration reseeds layout -> a frame must run
+        }
         return this;
     }
 
@@ -276,6 +326,7 @@ export class ScrollEngine {
         for (let i = 0; i < subs.length; i++) {
             if (typeof subs[i].resize === 'function') subs[i].resize();
         }
+        this.wake(); // new geometry must be rendered even if the loop had parked
     }
 
     /** Snap to the current scroll position and start the frame loop. */
@@ -291,12 +342,17 @@ export class ScrollEngine {
         if (typeof this.spring.snap === 'function') this.spring.snap(startY);
 
         this.isActive = true;
+        this.isParked = false;
+        this._settle = 0;
+        this._wakePending = false;
+        this._lastTargetY = startY;
         this._lastTime = 0;
         if (this._raf) this._rafHandle = this._raf(this._boundTick);
     }
 
     _tick(time) {
         if (!this.isActive) return;
+        this._wakePending = false; // wake() during this tick will re-set it
 
         // dt in seconds, clamped so a resumed background tab does not lurch.
         let dt = this._lastTime ? (time - this._lastTime) / 1000 : 0;
@@ -316,11 +372,63 @@ export class ScrollEngine {
         const subs = this._subscribers;
         for (let i = 0; i < subs.length; i++) subs[i].render(this.currentY);
 
-        if (this._raf) this._rafHandle = this._raf(this._boundTick);
+        // A renderer may synchronously destroy() the engine (an SPA unmount from
+        // inside render()); destroy() nulls this.spring and tears down the raf +
+        // listeners. Bail before touching the settle path -- do NOT reschedule,
+        // the loop is already dead. Fail closed on the torn-down state.
+        if (!this.spring) return;
+
+        // Idle discipline. velocity is read into a local and gated on
+        // Number.isFinite so EVERY non-finite/absent value fails closed: null
+        // (Math.abs(null) coerces to 0 -- "null is not zero"), undefined, NaN,
+        // and +/-Infinity are all rejected, so the loop only parks on a spring at
+        // a verified rest. In reduced motion currentY tracks targetY 1:1, so rest
+        // is a stationary target across two frames.
+        const v = this.spring.velocity;
+        const settled = Math.abs(this.currentY - targetY) < SETTLE_EPS_PX
+            && (this._reducedMotion
+                ? targetY === this._lastTargetY
+                : (Number.isFinite(v) && Math.abs(v) < SETTLE_VEL));
+        this._lastTargetY = targetY;
+
+        if (settled && this._parkEnabled && ++this._settle >= SETTLE_N && !this._wakePending) {
+            this._park();
+        } else {
+            if (!settled) this._settle = 0;
+            if (this._raf) this._rafHandle = this._raf(this._boundTick);
+        }
+    }
+
+    /**
+     * Wake the frame loop (cold path). Resets the settle counter so an in-flight
+     * park attempt is aborted, and marks _wakePending so a wake landing inside
+     * the current tick blocks that tick from parking (the same-tick race). Only
+     * schedules a frame when the loop is actually parked and the engine is live,
+     * and only ever a SINGLE frame -- never a double schedule.
+     */
+    wake() {
+        this._wakePending = true;
+        this._settle = 0;
+        if (this.isParked && this.isActive) {
+            this.isParked = false;
+            this._lastTime = 0; // fresh dt baseline so the resumed frame does not lurch
+            if (this._raf) this._rafHandle = this._raf(this._boundTick);
+        }
+    }
+
+    /**
+     * Park the frame loop (cold path, from _tick only). Sets isParked and stops
+     * rescheduling; the current tick simply does not queue another. wake()
+     * restarts it. Does not reschedule.
+     */
+    _park() {
+        this.isParked = true;
+        this._rafHandle = 0;
     }
 
     destroy() {
         this.isActive = false;
+        this.isParked = false;
         if (this._cancelRaf && this._rafHandle) this._cancelRaf(this._rafHandle);
         this._rafHandle = 0;
 

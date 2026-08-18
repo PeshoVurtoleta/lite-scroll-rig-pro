@@ -17,6 +17,8 @@
  *                   ResizeObservers and a bounded heap delta (SR-03). lite-leak
  *                   ^1.9.0 is unpublished (registry max 1.8.1), so the retention
  *                   proof is the sanctioned manual gc heap-delta probe.
+ *     T1b park      SR-05 idle discipline: a park/wake cycle at 0 B/op, plus a
+ *                   4096x create/park/wake/destroy churn with a bounded heap delta
  *     T2 controls   the gate must be able to fail
  *
  * Control: SCROLL_RIG_TORTURE_BREAK=1 node --expose-gc test/torture.mjs injects a
@@ -146,6 +148,52 @@ function t1Retention() {
     }
 }
 
+// --- T1b: park/wake at 0 B/op + create/park/wake/destroy leaks no heap --------
+function t1bPark() {
+    // Steady-state park/wake on one engine. A settled spring (currentY 0 ==
+    // target 0, velocity 0) parks after SETTLE_N frames; wake() unparks. Neither
+    // branch may allocate over a long idle.
+    const engine = new ScrollEngine(null, {
+        input: fakeInput(0, 1e9), spring: fakeSpring(0, 0), raf: () => 1, cancelRaf: () => {}
+    });
+    engine.isActive = true;
+    let clock = 0;
+    const cycle = () => {
+        clock += 16; engine._tick(clock);
+        clock += 16; engine._tick(clock);
+        clock += 16; engine._tick(clock); // 3rd settled frame -> park
+        engine.wake();                    // unpark + schedule
+    };
+    const result = measureAllocs(cycle, { iterations: 1000, batches: 8 });
+    if (checkAllocs(result, { maxBytesPerCall: 0 }).verdict !== 'pass') {
+        die('T1b park: park/wake cycle allocated ' + result.bytesPerCall + ' B/call');
+    }
+
+    // Retention: create an engine, park it, wake it, destroy it, 4096x. A parked
+    // engine that retained a raf handle or a wake closure would grow the heap.
+    const CYCLES = 4096;
+    const runCycle = () => {
+        const e = new ScrollEngine(null, {
+            input: fakeInput(0, 1e9), spring: fakeSpring(0, 0), raf: () => 1, cancelRaf: () => {}
+        });
+        e.isActive = true;
+        let c = 0;
+        e._tick(c += 16); e._tick(c += 16); e._tick(c += 16); // park
+        e.wake();                                             // wake
+        e.destroy();
+    };
+    for (let i = 0; i < 512; i++) runCycle();
+    globalThis.gc(); globalThis.gc();
+    const before = process.memoryUsage().heapUsed;
+    for (let i = 0; i < CYCLES; i++) runCycle();
+    globalThis.gc(); globalThis.gc();
+    const after = process.memoryUsage().heapUsed;
+    const delta = after - before;
+    if (delta > 64 * 1024) {
+        die('T1b park: heap grew ' + delta + ' B across ' + CYCLES + ' create/park/wake/destroy cycles (budget 65536 B)');
+    }
+}
+
 function main() {
     if (typeof globalThis.gc !== 'function') {
         die('run with --expose-gc:  node --expose-gc test/torture.mjs');
@@ -154,6 +202,7 @@ function main() {
     t0Alloc();
     t0Dispatch();
     t1Retention();
+    t1bPark();
 
     // T2 control: with BREAK set, T0's allocating binder must already have tripped
     // the ceiling and exited non-zero. Reaching here means the gate could not fail.

@@ -45,6 +45,12 @@ export interface ScrollEngineOptions extends VirtualScrollOptions {
      * stays on. The native scrollbar is never synchronized (transform-only rig).
      */
     keyboard?: boolean;
+    /**
+     * Park the rAF loop when the spring settles and wake it on input
+     * (wheel / touch / keyboard / native scroll / resize / ResizeObserver).
+     * Default true. false keeps the loop running every frame.
+     */
+    park?: boolean;
     input?: unknown;
     spring?: unknown;
     win?: Window;
@@ -58,10 +64,14 @@ export class ScrollEngine {
     constructor(target: HTMLElement | Window, options?: ScrollEngineOptions);
     currentY: number;
     isActive: boolean;
+    /** True while the rAF loop is parked (settled + idle). For a HUD. */
+    isParked: boolean;
     input: VirtualScroll;
     addRenderer(renderer: ScrollRenderer): this;
     resize(): void;
     start(): void;
+    /** Wake a parked frame loop. Idempotent; only schedules when parked. */
+    wake(): void;
     destroy(): void;
 }
 

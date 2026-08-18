@@ -18,9 +18,17 @@ currentY = targetY (no spring). Change feel via `preset` option or inject a spri
 
 ## Public API (from src/index.js)
 - ScrollEngine(target, options): addRenderer(r{render(currentY),resize?}), resize(),
-  start(), destroy(). Options: preset, maxDeltaTime, getMaxScroll, reducedMotion,
-  keyboard (default true), multiplier, touchMultiplier, and DI: input, spring, win,
-  raf, cancelRaf, matchMedia. Cold-path window listeners (never in _tick/render):
+  start(), wake(), destroy(); isParked (bool, HUD). Options: preset, maxDeltaTime,
+  getMaxScroll, reducedMotion, keyboard (default true), park (default true),
+  multiplier, touchMultiplier, and DI: input, spring, win, raf, cancelRaf,
+  matchMedia. Idle discipline (SR-05, cold path): when the spring settles
+  (|currentY-targetY| < 0.05 px and |velocity| < 0.5 px/s -- non-finite velocity
+  is never settled, fail closed) for 3 consecutive frames the rAF loop parks
+  (isParked true, no wake-ups); wake() restarts it within one frame and is called
+  on wheel/touch/setTargetY (via VirtualScroll._onInput), native scroll, keyboard,
+  resize, addRenderer, and ResizeObserver invalidation. park:false keeps the loop
+  always running. See decisions/0004-park-wake.md. Cold-path window listeners
+  (never in _tick/render):
   a passive scroll listener reconciles targetY to window.scrollY (native wins;
   transform-only rig never scrollTo, so native scroll is always foreign; a >=200px
   jump also snaps the spring), and a keydown listener drives arrows (+/-40),

@@ -23,4 +23,4 @@ export {
  * runtime reads it; the release gate asserts VERSION === package.json.version
  * by exact string compare, so this line is a version site.
  */
-export const VERSION = '1.1.0';
+export const VERSION = '1.2.0';

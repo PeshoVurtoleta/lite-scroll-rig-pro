@@ -202,11 +202,14 @@ export function fakeTarget(init = {}) {
 }
 
 // Fake spring: update() returns a sentinel distinct from target, proving the
-// engine forwards the spring's output (not the raw target) to renderers.
-export function fakeSpring(ret = 999) {
+// engine forwards the spring's output (not the raw target) to renderers. The
+// second arg seeds a settable `velocity` field (SR-05 park/wake): the engine's
+// settle test reads spring.velocity, so a test can drive it to rest (0), keep it
+// moving (>= SETTLE_VEL), or feed a non-finite value to exercise fail-closed.
+export function fakeSpring(ret = 999, velocity = 0) {
     return {
-        target: 0, _ret: ret, updateCalls: 0, lastDt: -1, snapped: null,
-        snap(v) { this.snapped = v; this.target = v; },
+        target: 0, velocity, _ret: ret, updateCalls: 0, lastDt: -1, snapped: null,
+        snap(v) { this.snapped = v; this.target = v; this.velocity = 0; },
         update(dt) { this.updateCalls++; this.lastDt = dt; return this._ret; }
     };
 }

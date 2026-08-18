@@ -4,6 +4,40 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.0]
+
+Idle discipline: the frame loop sleeps when settled and wakes on input, all
+cold-path -- the hot bodies (`_tick`, `render`) stay byte-frozen and 0 B/op.
+
+### Added
+- **Park when settled, wake on input (SR-05).** When the spring reports rest --
+  `|currentY - targetY| < 0.05 px` and `|velocity| < 0.5 px/s` for 3 consecutive
+  frames -- `ScrollEngine` cancels the `requestAnimationFrame` loop instead of
+  waking ~60 times a second to recompute the same transform. A non-finite
+  velocity is never counted as settled (fail closed), so the loop only parks on a
+  spring it can vouch for. `wake()` restarts the loop within one frame and is
+  called on wheel/touch/`setTargetY` (via a new null-guarded `VirtualScroll._onInput`
+  hook the engine wires to its bound `wake()`), native scroll reconciliation,
+  keyboard, `resize()`, `addRenderer()`, and `ResizeObserver` invalidation (via a
+  `DOMScroller._onInvalidate` seam). The same-tick input-vs-park race is closed by
+  clearing `_wakePending` at the top of `_tick` and refusing to park if a `wake()`
+  lands during that tick. See `decisions/0004-park-wake.md`.
+- `park` option (default `true`; `{ park: false }` keeps the loop always running)
+  and a public `isParked` boolean for a HUD.
+- `ScrollEngineOptions.park`, `ScrollEngine.isParked`, and `ScrollEngine.wake()`
+  in the TypeScript definitions.
+- `test/park.test.js` -- idle-parks, off switch, wake latency (<= 1 frame from
+  every source), the same-tick race, and the non-finite-velocity fail-closed path.
+- Torture gate `T1b` (`test/torture.mjs`) and a ceilings tier: a park/wake cycle
+  at 0 B/op plus a 4096x create/park/wake/destroy churn with a bounded heap delta.
+- `decisions/0004-park-wake.md`; a browser lane under `test/browser/` (Playwright,
+  opt-in via `npm run lane` / `npm run lane:alloc`; never part of `test`,
+  `verify`, or `prepublishOnly`).
+
+### Changed
+- `_tick` gains only the settle compute (two field reads, one compare, a counter,
+  one park branch) after the render loop; it remains allocation-free.
+
 ## [1.1.0]
 
 Native scroll reconciliation and keyboard access, both entirely on the cold path.

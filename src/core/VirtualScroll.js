@@ -53,6 +53,12 @@ export class VirtualScroll {
         // 0, so 0 is the correct verified start.
         this._lastNativeY = 0;
 
+        // Wake hook (SR-05). The engine assigns this to its bound wake() so a
+        // wheel/touch/setTargetY targetY change can wake a parked frame loop.
+        // Null until wired; every call site null-guards it, so a standalone
+        // VirtualScroll (no engine) costs nothing here. See decisions/0004.
+        this._onInput = null;
+
         this.isActive = true;
 
         this._onWheel = this._onWheel.bind(this);
@@ -95,6 +101,7 @@ export class VirtualScroll {
         if (v < 0) v = 0;
         else if (v > this.maxScroll) v = this.maxScroll;
         this.targetY = v;
+        if (this._onInput) this._onInput();
     }
 
     _onWheel(e) {
@@ -113,6 +120,7 @@ export class VirtualScroll {
         this.targetY += deltaY;
         if (this.targetY < 0) this.targetY = 0;
         if (this.targetY > this.maxScroll) this.targetY = this.maxScroll;
+        if (this._onInput) this._onInput();
     }
 
     destroy() {
@@ -120,5 +128,6 @@ export class VirtualScroll {
         this.target.removeEventListener('wheel', this._onWheel);
         if (this._tracker && typeof this._tracker.destroy === 'function') this._tracker.destroy();
         this._tracker = null;
+        this._onInput = null;
     }
 }

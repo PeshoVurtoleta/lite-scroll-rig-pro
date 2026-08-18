@@ -52,6 +52,11 @@ export class DOMScroller {
         this.matrices = new Float32Array(this.count * FLOATS_PER_MATRIX);
         this.binder = options.binder || new DOMBinder(this.count);
 
+        // Wake seam (SR-05): ScrollEngine.addRenderer assigns its bound wake() here
+        // so a ResizeObserver firing on a late image load can wake a parked loop
+        // and render the re-measured bounds. Null until wired; cold path.
+        this._onInvalidate = null;
+
         this.cache = new MetricsCache(elements, options.win, {
             observe: !!options.observe,
             ResizeObserverCtor: options.ResizeObserverCtor,
@@ -62,6 +67,7 @@ export class DOMScroller {
 
     _invalidate() {
         if (this.binder && typeof this.binder.invalidate === 'function') this.binder.invalidate();
+        if (this._onInvalidate) this._onInvalidate();
     }
 
     /** Re-measure and force a transform re-push. Call on resize. */
@@ -101,5 +107,6 @@ export class DOMScroller {
         this.binder = null;
         this.matrices = null;
         this.cache = null;
+        this._onInvalidate = null;
     }
 }

@@ -64,6 +64,29 @@ test('_tick() allocates 0 B/op in steady state over 10000 frames', { skip }, () 
         '_tick() allocated ' + result.bytesPerCall + ' B/call');
 });
 
+test('park + wake cycle allocates 0 B/op', { skip }, () => {
+    // SR-05 idle discipline: neither parking (the settle branch in _tick) nor
+    // waking may allocate. A settled spring (currentY 0 == target 0, velocity 0)
+    // parks after SETTLE_N frames; wake() unparks and reschedules. Each op ticks
+    // to the park then wakes, so both branches are exercised every call.
+    const input = fakeInput(0, 1e9);
+    const spring = fakeSpring(0, 0);
+    const engine = new ScrollEngine(null, { input, spring, raf: () => 1, cancelRaf: () => {} });
+    engine.isActive = true;
+
+    let clock = 0;
+    const op = () => {
+        clock += 16; engine._tick(clock);
+        clock += 16; engine._tick(clock);
+        clock += 16; engine._tick(clock); // 3rd settled frame -> park
+        engine.wake();                    // unpark + schedule one frame
+    };
+    const result = measureAllocs(op, { iterations: 1000, batches: 8 });
+    const report = checkAllocs(result, { maxBytesPerCall: 0 });
+    assert.equal(report.verdict, 'pass',
+        'park/wake cycle allocated ' + result.bytesPerCall + ' B/call');
+});
+
 test('scroll + keydown dispatch allocates 0 B/op over 4096 dispatches', { skip }, () => {
     // SR1 cold-path budget: the native-scroll reconciler and the keyboard handler
     // must not allocate. Handlers are invoked directly with a reused event object
